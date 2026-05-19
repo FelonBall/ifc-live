@@ -1,7 +1,6 @@
-# Context for Claude Code
+# CLAUDE.md
 
-This file is loaded at the start of every Claude Code session in this repo.
-Read it first, then read whatever else you need.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this project is
 
@@ -185,17 +184,18 @@ done.
 ## Commands
 
 ```sh
-uv sync                           # install everything (creates .venv)
-uv run check                      # full local CI suite (canonical)
-uv run check --fast               # quick: skip slow tests, no coverage
-uv run check --skip-tests         # just lint + typecheck
-uv run ruff check                 # lint only
-uv run ruff format                # apply formatter (writes changes)
-uv run pyright                    # type check (strict)
-uv run pytest                     # all tests
-uv run pytest -k <expr>           # subset by name
-uv run pytest -m "not requires_bonsai"  # skip Blender-dependent tests
-uv run ifc-sync-server            # start the server (once implemented)
+uv sync                                    # install everything (creates .venv)
+uv run check                               # full local CI suite (canonical)
+uv run check --fast                        # quick: skip slow tests, no coverage
+uv run check --skip-tests                  # just lint + typecheck
+uv run ruff check                          # lint only
+uv run ruff format                         # apply formatter (writes changes)
+uv run pyright                             # type check (strict)
+uv run pytest                              # all tests
+uv run pytest -k <expr>                    # subset by name/expression
+uv run pytest packages/ifc-sync-core/      # single package
+uv run pytest -m "not requires_bonsai"     # skip Blender-dependent tests
+uv run ifc-sync-server                     # start the server (once implemented)
 ```
 
 Prefer `uv run check` over running tools individually unless you need
@@ -203,10 +203,31 @@ something finer-grained.
 
 ## Current implementation status
 
-The scaffold builds and Milestone 1 step 1 (the `ifc-ops` data model)
-is complete. Subsequent steps are listed in
-[`docs/MILESTONE_1.md`](docs/MILESTONE_1.md). Continue with the next
-unstarted step unless the user says otherwise.
+Steps 1 and 2 of Milestone 1 are complete:
+
+- **Step 1 — `ifc-ops`**: Pydantic models for `IfcOpEnvelope`, all
+  `IfcMutation` variants, and the `IfcValue` union. Wire format is
+  stable; don't change it without updating `docs/PROTOCOL.md` too.
+
+- **Step 2 — `ifc-sync-core` op application**: `apply_op()`,
+  `serialize_value()`, `deserialize_value()`, `serialize_entity()`, and
+  `register_non_root()` are implemented and exported from
+  `packages/ifc-sync-core/src/ifc_sync_core/`.
+
+Continue with Step 3 (`ifc-sync-server` minimal relay) unless the user
+says otherwise. See [`docs/MILESTONE_1.md`](docs/MILESTONE_1.md) for
+the full ordered list.
+
+### Key architectural pattern: non-root entity identity
+
+`IfcLocalPlacement`, `IfcDirection`, profile definitions, and other
+IFC entities that don't inherit `IfcRoot` have no `GlobalId`. The op
+model is GUID-addressed, so `serialize.py` maintains a per-model
+registry (`WeakKeyDictionary`) mapping STEP entity IDs ↔ synthetic
+GUIDs. Callers must call `register_non_root()` before serializing such
+entities; `apply_op()` does this automatically when applying an
+`AddEntity` op for a non-root type. See `DESIGN.md §3 "Non-root entity
+identity"` for the full rationale and lifecycle constraints.
 
 ## Things to investigate before implementation step 4
 

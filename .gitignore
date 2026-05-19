@@ -40,6 +40,8 @@ tmp/
 *.swo
 .DS_Store
 Thumbs.db
+.claude/
+
 
 # --- Logs ---
 *.log
