@@ -32,6 +32,7 @@ packages/
   ifc-sync-core/      SyncedIfcModel + op application. Depends on ifcopenshell.
   ifc-sync-server/    FastAPI WebSocket relay. Depends on ifc-ops.
   ifc-sync-bonsai/    Blender addon. Depends on ifc-sync-core.
+tools/                Dev tooling. Contains the `check` console script.
 ```
 
 Each package has `src/<name>/`, `tests/`, and its own `pyproject.toml`. The
@@ -62,21 +63,33 @@ configuration (`ruff`, `pyright`, `pytest`).
 
 6. **`ruff format` is authoritative.** Don't hand-format.
 
-7. **Commit messages follow [`CONTRIBUTING.md`](CONTRIBUTING.md).** Conventional
+7. **Run `uv run check` before declaring a task done.** It's the canonical
+   local CI suite — same commands as `.github/workflows/ci.yml` in the same
+   order. If it passes locally, CI almost always passes on push. Use
+   `uv run check --fast` for quick feedback during dev and the full
+   `uv run check` before committing.
+
+8. **Commit messages follow [`CONTRIBUTING.md`](CONTRIBUTING.md).** Conventional
    prefixes (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`).
 
 ## Commands
 
 ```sh
-uv sync                           # install everything
-uv run ruff check                 # lint
-uv run ruff format                # format
+uv sync                           # install everything (creates .venv)
+uv run check                      # full local CI suite (canonical)
+uv run check --fast               # quick: skip slow tests, no coverage
+uv run check --skip-tests         # just lint + typecheck
+uv run ruff check                 # lint only
+uv run ruff format                # apply formatter (writes changes)
 uv run pyright                    # type check (strict)
 uv run pytest                     # all tests
 uv run pytest -k <expr>           # subset by name
 uv run pytest -m "not requires_bonsai"  # skip Blender-dependent tests
 uv run ifc-sync-server            # start the server (once implemented)
 ```
+
+Prefer `uv run check` over running tools individually unless you need
+something finer-grained.
 
 ## Current implementation status
 

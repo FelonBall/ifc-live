@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 [manifest]
 members = [
     "ifc-live",
+    "ifc-live-dev",
     "ifc-ops",
     "ifc-sync-bonsai",
     "ifc-sync-core",
@@ -242,6 +243,7 @@ name = "ifc-live"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "ifc-live-dev" },
     { name = "ifc-ops" },
     { name = "ifc-sync-bonsai" },
     { name = "ifc-sync-core" },
@@ -259,6 +261,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ifc-live-dev", editable = "tools" },
     { name = "ifc-ops", editable = "packages/ifc-ops" },
     { name = "ifc-sync-bonsai", editable = "packages/ifc-sync-bonsai" },
     { name = "ifc-sync-core", editable = "packages/ifc-sync-core" },
@@ -273,6 +276,11 @@ dev = [
     { name = "pytest-cov", specifier = ">=4.1" },
     { name = "ruff", specifier = ">=0.4.0" },
 ]
+
+[[package]]
+name = "ifc-live-dev"
+version = "0.1.0"
+source = { editable = "tools" }
 
 [[package]]
 name = "ifc-ops"

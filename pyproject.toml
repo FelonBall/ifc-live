@@ -16,16 +16,18 @@ dependencies = [
     "ifc-sync-core",
     "ifc-sync-server",
     "ifc-sync-bonsai",
+    "ifc-live-dev",
 ]
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "tools"]
 
 [tool.uv.sources]
 ifc-ops = { workspace = true }
 ifc-sync-core = { workspace = true }
 ifc-sync-server = { workspace = true }
 ifc-sync-bonsai = { workspace = true }
+ifc-live-dev = { workspace = true }
 
 [tool.uv]
 # Mark the root as a non-buildable virtual project. Workspace members are
@@ -50,6 +52,7 @@ src = [
     "packages/ifc-sync-core/src",
     "packages/ifc-sync-server/src",
     "packages/ifc-sync-bonsai/src",
+    "tools/src",
 ]
 
 [tool.ruff.lint]
@@ -84,6 +87,7 @@ include = [
     "packages/ifc-sync-core/src",
     "packages/ifc-sync-server/src",
     "packages/ifc-sync-bonsai/src",
+    "tools/src",
 ]
 exclude = ["**/__pycache__", "**/.venv"]
 pythonVersion = "3.11"
@@ -117,6 +121,7 @@ addopts = [
 markers = [
     "integration: marks tests requiring multiple components (deselect with -m 'not integration')",
     "requires_bonsai: marks tests requiring Blender + Bonsai (deselect with -m 'not requires_bonsai')",
+    "slow: marks slow tests (deselect with -m 'not slow')",
 ]
 
 [tool.coverage.run]
