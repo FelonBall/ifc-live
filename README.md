@@ -65,7 +65,7 @@ ifc-live/
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ifc-live.git
+git clone https://github.com/FelonBall/ifc-live.git
 cd ifc-live
 uv sync
 ```

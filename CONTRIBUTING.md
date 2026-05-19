@@ -21,7 +21,7 @@ Small PRs — typo fixes, docs improvements, additional tests for existing code
 ## Local setup
 
 ```sh
-git clone https://github.com/YOUR_USERNAME/ifc-live.git
+git clone https://github.com/FelonBall/ifc-live.git
 cd ifc-live
 uv sync
 ```

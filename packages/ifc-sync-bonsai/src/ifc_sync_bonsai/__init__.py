@@ -20,7 +20,7 @@ bl_info = {
     "description": "Real-time collaboration for IFC models",
     "location": "View3D > N-Panel > ifc-live",
     "warning": "Pre-alpha — see docs/MILESTONE_1.md",
-    "doc_url": "https://github.com/YOUR_USERNAME/ifc-live",
+    "doc_url": "https://github.com/FelonBall/ifc-live",
 }
 
 
