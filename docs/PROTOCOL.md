@@ -1,8 +1,8 @@
 # Wire Protocol
 
-> **Status:** Specification in progress. The shape below is the v1 plan from
-> `DESIGN.md` section 4 — exact field names and types are subject to refinement
-> as `ifc-ops` lands (Milestone 1 step 1) and the server is built (step 3).
+> **Status:** Envelope and payload schemas are final as of Milestone 1 step 1
+> (`ifc-ops` package implemented and tested). Server message types (`sync`,
+> `ready`, `op_ack`, `conflict_resolved`) remain provisional until step 3.
 
 ## Transport
 
@@ -59,7 +59,7 @@ Sent whenever the client wants to mutate the model.
 }
 ```
 
-See `DESIGN.md` section 3 for the full schema of `payload`.
+See [Op payload types](#op-payload-types) below for the full `payload` schema.
 
 ### Server → Client
 
@@ -126,6 +126,97 @@ surface a notification to the user.
   "attribute": "Name"
 }
 ```
+
+## Op payload types
+
+The `payload` field of every `IfcOpEnvelope` is one of four mutation types,
+discriminated by `kind`.
+
+### `IfcValue` types
+
+Every attribute value and property value is an `IfcValue` — a tagged object
+discriminated by `kind`:
+
+| `kind`    | Extra fields          | Notes |
+|-----------|-----------------------|-------|
+| `string`  | `value: str`          | |
+| `int`     | `value: int`          | |
+| `float`   | `value: float`        | |
+| `bool`    | `value: bool`         | |
+| `enum`    | `value: str`          | String token, e.g. `"SOLIDWALL"` |
+| `ref`     | `guid: str`           | IFC GlobalId of the referenced entity |
+| `list`    | `values: [IfcValue…]` | Recursive; used for coordinates, sets, etc. |
+| `null`    | _(none)_              | Unset / `$` in STEP |
+
+### `add_entity`
+
+Creates a new IFC entity. All geometry is expressed as `IfcRef` values — the
+referenced placement and representation entities must arrive (as their own
+`add_entity` ops) before this op is applied.
+
+```json
+{
+  "kind": "add_entity",
+  "guid": "3fSEzHa$D1Hv_MlW1vNfSa",
+  "ifc_type": "IfcWall",
+  "attributes": {
+    "Name":             { "kind": "string", "value": "Wall-N" },
+    "PredefinedType":   { "kind": "enum",   "value": "SOLIDWALL" },
+    "ObjectType":       { "kind": "null" },
+    "ObjectPlacement":  { "kind": "ref",    "guid": "PlacGuid000001" },
+    "Representation":   { "kind": "ref",    "guid": "RepGuid0000001" }
+  }
+}
+```
+
+### `delete_entity`
+
+Removes an entity. `previous_snapshot` is a raw JSON object with the entity's
+attribute values at deletion time, stored verbatim for audit/undo.
+
+```json
+{
+  "kind": "delete_entity",
+  "guid": "3fSEzHa$D1Hv_MlW1vNfSa",
+  "previous_snapshot": {
+    "GlobalId": "3fSEzHa$D1Hv_MlW1vNfSa",
+    "Name": "Wall-N",
+    "PredefinedType": "SOLIDWALL"
+  }
+}
+```
+
+### `modify_attribute`
+
+Changes a single direct attribute on an existing entity.
+
+```json
+{
+  "kind": "modify_attribute",
+  "guid": "3fSEzHa$D1Hv_MlW1vNfSa",
+  "attribute": "Name",
+  "previous_value": { "kind": "string", "value": "Wall-N" },
+  "new_value":      { "kind": "string", "value": "Wall-North" }
+}
+```
+
+### `set_property_value`
+
+Sets a property inside a named property set. `previous_value` is `null` (JSON
+`null`, not the `IfcNull` kind) when the property did not exist before.
+
+```json
+{
+  "kind": "set_property_value",
+  "entity_guid": "3fSEzHa$D1Hv_MlW1vNfSa",
+  "pset_name": "Pset_WallCommon",
+  "property_name": "FireRating",
+  "previous_value": null,
+  "new_value": { "kind": "string", "value": "REI 60" }
+}
+```
+
+---
 
 ## HTTP endpoints
 

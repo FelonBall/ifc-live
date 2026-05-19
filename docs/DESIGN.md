@@ -109,54 +109,57 @@ The op model is the most load-bearing part of the design. Everything else flows 
 ### Op envelope
 
 ```python
-from typing import Literal, Union
-from uuid import UUID
-from pydantic import BaseModel
+SCHEMA_VERSION: Literal["1"] = "1"   # module-level constant; also set on every envelope
 
 class IfcOpEnvelope(BaseModel):
     schema_version: Literal["1"] = "1"
-    op_id: UUID                  # UUIDv7, time-ordered
-    parent_op_id: UUID | None    # op_id of the client's known HEAD when this was made
-    file_id: str                 # which IFC file this op targets
-    author: str                  # client session id (no real users in v1)
-    timestamp: float             # client clock, unix seconds
-    payload: "IfcMutation"
+    op_id: UUID                       # UUIDv7, time-ordered
+    parent_op_id: UUID | None = None  # None for the first op in a session
+    file_id: str                      # which IFC file this op targets
+    author: str                       # client session id (no real users in v1)
+    timestamp: float                  # client clock, unix seconds
+    payload: IfcMutation
 ```
+
+`parent_op_id` defaults to `None` so callers don't have to pass it explicitly when
+opening a fresh session.
 
 ### Mutation types
 
 ```python
 class AddEntity(BaseModel):
     kind: Literal["add_entity"] = "add_entity"
-    guid: str                    # IFC GlobalId
-    ifc_type: str                # e.g. "IfcWall", "IfcDoor"
-    attributes: dict[str, "IfcValue"]  # IFC attribute values, GUID-referenced
+    guid: str                         # IFC GlobalId
+    ifc_type: str                     # e.g. "IfcWall", "IfcDoor"
+    attributes: dict[str, IfcValue]   # IFC attribute values, GUID-referenced
 
 class DeleteEntity(BaseModel):
     kind: Literal["delete_entity"] = "delete_entity"
     guid: str
-    previous_snapshot: dict      # full entity state for audit/undo
+    previous_snapshot: dict[str, Any] # full entity state for audit/undo (raw Python
+                                      # primitives, not IfcValue-typed — audit-only,
+                                      # not intended for entity reconstruction)
 
 class ModifyAttribute(BaseModel):
     kind: Literal["modify_attribute"] = "modify_attribute"
     guid: str
-    attribute: str               # e.g. "Name", "ObjectType"
-    previous_value: "IfcValue"
-    new_value: "IfcValue"
+    attribute: str                    # e.g. "Name", "ObjectType"
+    previous_value: IfcValue
+    new_value: IfcValue
 
 class SetPropertyValue(BaseModel):
     kind: Literal["set_property_value"] = "set_property_value"
     entity_guid: str
-    pset_name: str               # e.g. "Pset_WallCommon"
-    property_name: str           # e.g. "FireRating"
-    previous_value: "IfcValue | None"
-    new_value: "IfcValue"
+    pset_name: str                    # e.g. "Pset_WallCommon"
+    property_name: str                # e.g. "FireRating"
+    previous_value: IfcValue | None   # None when the property is new
+    new_value: IfcValue
 
-IfcMutation = Union[
-    AddEntity,
-    DeleteEntity,
-    ModifyAttribute,
-    SetPropertyValue,
+# Discriminated on the `kind` field — deserializer dispatches without
+# inspecting every variant.
+IfcMutation = Annotated[
+    AddEntity | DeleteEntity | ModifyAttribute | SetPropertyValue,
+    Field(discriminator="kind"),
 ]
 ```
 
@@ -165,16 +168,22 @@ IfcMutation = Union[
 `IfcValue` is a tagged union representing the value types IFC supports. Initial scope:
 
 ```python
-class IfcString(BaseModel):    kind: Literal["string"] = "string";    value: str
-class IfcInt(BaseModel):       kind: Literal["int"] = "int";          value: int
-class IfcFloat(BaseModel):     kind: Literal["float"] = "float";      value: float
-class IfcBool(BaseModel):      kind: Literal["bool"] = "bool";        value: bool
-class IfcEnum(BaseModel):      kind: Literal["enum"] = "enum";        value: str
-class IfcRef(BaseModel):       kind: Literal["ref"] = "ref";          guid: str
-class IfcList(BaseModel):      kind: Literal["list"] = "list";        values: list["IfcValue"]
-class IfcNull(BaseModel):      kind: Literal["null"] = "null"
+class IfcString(BaseModel):  kind: Literal["string"] = "string";  value: str
+class IfcInt(BaseModel):     kind: Literal["int"]    = "int";     value: int
+class IfcFloat(BaseModel):   kind: Literal["float"]  = "float";   value: float
+class IfcBool(BaseModel):    kind: Literal["bool"]   = "bool";    value: bool
+class IfcEnum(BaseModel):    kind: Literal["enum"]   = "enum";    value: str
+class IfcRef(BaseModel):     kind: Literal["ref"]    = "ref";     guid: str
+class IfcList(BaseModel):    kind: Literal["list"]   = "list";    values: list[IfcValue]
+class IfcNull(BaseModel):    kind: Literal["null"]   = "null"
 
-IfcValue = Union[IfcString, IfcInt, IfcFloat, IfcBool, IfcEnum, IfcRef, IfcList, IfcNull]
+# Same discriminated-union pattern as IfcMutation. IfcList is recursive
+# (IfcValue → IfcList → IfcValue …); model_rebuild() is called after the
+# union is defined to resolve the forward reference.
+IfcValue = Annotated[
+    IfcString | IfcInt | IfcFloat | IfcBool | IfcEnum | IfcRef | IfcList | IfcNull,
+    Field(discriminator="kind"),
+]
 ```
 
 Complex geometry values (placements, profiles, swept solids) are serialized as nested entity references — i.e. when a wall is added, the placement and representation it references are added as separate entities first via their own `AddEntity` ops.
@@ -516,3 +525,6 @@ For absolute clarity, these are **not** part of v1:
 - Clash detection
 - Conflict resolution beyond automatic LWW
 - Performance optimization for models > 10k entities
+- Entity reconstruction from audit log snapshots (`previous_snapshot` stores raw
+  Python primitives for human-readable audit; it is not a reversible serialization
+  format and is not designed to rebuild entities)
