@@ -12,13 +12,22 @@ steps 2 and 4 for the work items.
 
 __version__ = "0.1.0"
 
-# Public API to be populated as Milestone 1 progresses.
-# Expected exports:
-#   SyncedIfcModel
-#   SyncedEntity
-#   apply_op(model, op)              # M1 step 2
-#   serialize_entity(entity)         # M1 step 2
-#   serialize_value(value)           # M1 step 2
-#   deserialize_value(value)         # M1 step 2
+from ifc_sync_core.apply import apply_op as apply_op
+from ifc_sync_core.serialize import (
+    deserialize_value as deserialize_value,
+)
+from ifc_sync_core.serialize import (
+    serialize_entity as serialize_entity,
+)
+from ifc_sync_core.serialize import (
+    serialize_value as serialize_value,
+)
 
-__all__: list[str] = []
+# SyncedIfcModel and SyncedEntity are implemented in M1 step 4.
+
+__all__ = [
+    "apply_op",
+    "deserialize_value",
+    "serialize_entity",
+    "serialize_value",
+]
