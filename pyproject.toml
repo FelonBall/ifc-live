@@ -1,0 +1,131 @@
+[project]
+name = "ifc-live"
+version = "0.1.0"
+description = "Real-time collaboration for IFC models"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "ifc-live contributors" }]
+
+# The root project is a "virtual" meta-package — it doesn't build into a wheel
+# itself, it just pulls in every workspace member so `uv sync` installs them
+# all as editable. Without this, `uv sync` would install nothing because the
+# root depends on nothing.
+dependencies = [
+    "ifc-ops",
+    "ifc-sync-core",
+    "ifc-sync-server",
+    "ifc-sync-bonsai",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+ifc-ops = { workspace = true }
+ifc-sync-core = { workspace = true }
+ifc-sync-server = { workspace = true }
+ifc-sync-bonsai = { workspace = true }
+
+[tool.uv]
+# Mark the root as a non-buildable virtual project. Workspace members are
+# still built and installed; the root itself isn't packaged.
+package = false
+dev-dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+    "pyright>=1.1.350",
+    "ruff>=0.4.0",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff — lint + format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = [
+    "packages/ifc-ops/src",
+    "packages/ifc-sync-core/src",
+    "packages/ifc-sync-server/src",
+    "packages/ifc-sync-bonsai/src",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "C4",  # comprehensions
+    "SIM", # simplify
+    "RUF", # ruff-specific
+    "TID", # tidy imports
+    "PT",  # pytest style
+]
+ignore = [
+    "E501",  # line length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["N802"]  # test functions may have non-PEP8 names
+"**/__init__.py" = ["F401"]  # re-exports
+
+# ---------------------------------------------------------------------------
+# Pyright — strict type checking
+# ---------------------------------------------------------------------------
+[tool.pyright]
+include = [
+    "packages/ifc-ops/src",
+    "packages/ifc-sync-core/src",
+    "packages/ifc-sync-server/src",
+    "packages/ifc-sync-bonsai/src",
+]
+exclude = ["**/__pycache__", "**/.venv"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+# ifcopenshell and bpy don't have type stubs — accept this for now.
+reportUnknownMemberType = "warning"
+reportUnknownVariableType = "warning"
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+    "packages/ifc-ops/tests",
+    "packages/ifc-sync-core/tests",
+    "packages/ifc-sync-server/tests",
+    "packages/ifc-sync-bonsai/tests",
+]
+# importlib mode lets multiple packages each have a `tests/test_smoke.py`
+# without colliding on the module name `tests.test_smoke`. Required because
+# our test directories deliberately don't have __init__.py.
+asyncio_mode = "auto"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--import-mode=importlib",
+]
+markers = [
+    "integration: marks tests requiring multiple components (deselect with -m 'not integration')",
+    "requires_bonsai: marks tests requiring Blender + Bonsai (deselect with -m 'not requires_bonsai')",
+]
+
+[tool.coverage.run]
+source = ["packages"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

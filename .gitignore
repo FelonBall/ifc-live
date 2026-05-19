@@ -1,0 +1,46 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+wheels/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache/
+
+# --- uv ---
+.venv/
+uv.lock
+
+# --- Blender ---
+*.blend1
+*.blend2
+*.blend@
+
+# --- IFC / scratch ---
+*.ifc.bak
+scratch/
+tmp/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
