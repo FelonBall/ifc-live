@@ -200,6 +200,74 @@ For v1, the only IFC entities we explicitly support are:
 
 Other IFC entities will pass through as generic `AddEntity` / `ModifyAttribute` ops with their attributes serialized verbatim — but won't get specialized handling. The four supported building elements are what the v1 demo will exercise.
 
+### Non-root entity identity
+
+Only `IfcRoot` subclasses carry a stable `GlobalId`. Many IFC entities that
+building elements depend on — `IfcLocalPlacement`, `IfcAxis2Placement3D`,
+`IfcDirection`, profile definitions, etc. — do not inherit `IfcRoot` and have
+no built-in stable identity. Because every op references entities by GUID,
+these entities need one too.
+
+**Synthetic GUIDs** are assigned when an `AddEntity` op is applied to a
+non-root type. The op's `guid` field carries the synthetic GUID, and the
+applier registers it in a per-model non-root registry instead of writing it to
+`entity.GlobalId`.
+
+The registry is a `WeakKeyDictionary` keyed by `ifcopenshell.file`, so each
+model has its own isolated mapping and the entries are garbage-collected when
+the model is released:
+
+```python
+# maps entity STEP ID (int) → synthetic GUID (str), per model
+_entity_to_guid: WeakKeyDictionary[ifcopenshell.file, dict[int, str]]
+
+# reverse map: synthetic GUID → STEP ID, per model
+_guid_to_entity_id: WeakKeyDictionary[ifcopenshell.file, dict[str, int]]
+```
+
+**Lifecycle:** The registry is per-session only. STEP entity IDs are assigned
+by IfcOpenShell at creation time and are not stable across IFC save/reload
+(files can be renumbered on write). The registry is never persisted; after a
+reload the synthetic GUIDs would need to be re-established by replaying the op
+log.
+
+### IfcValue → NominalValue type mapping
+
+`SetPropertyValue` stores its `new_value` as an `IfcValue`, but
+`IfcPropertySingleValue.NominalValue` must be a typed IFC measure wrapper.
+The mapping used by the applier:
+
+| `IfcValue` variant | IFC `NominalValue` wrapper |
+|---|---|
+| `IfcString` | `IfcLabel` |
+| `IfcFloat` | `IfcReal` |
+| `IfcInt` | `IfcInteger` |
+| `IfcBool` | `IfcBoolean` |
+| `IfcRef` | ❌ not supported — raises `ValueError` |
+| `IfcList` | ❌ not supported — raises `ValueError` |
+
+`IfcRef` and `IfcList` are rejected because `NominalValue` must be a scalar.
+Callers that need to store a non-scalar value should model it as a nested
+entity via a separate `AddEntity` op.
+
+### Enum/string handling
+
+`serialize_value` cannot distinguish IFC enum-typed attributes from plain
+string attributes at runtime without schema introspection. All Python `str`
+values therefore emit as `IfcString` on the wire — `IfcEnum` is never produced
+automatically.
+
+On deserialization, `IfcOpenShell` accepts plain Python strings for
+enum-typed attributes, so the round-trip is lossless: an enum attribute
+serialized as `IfcString` and then deserialized back via `setattr` will be
+accepted by IfcOpenShell without error.
+
+`IfcEnum` exists in the wire format for callers that _explicitly_ know an
+attribute is enum-typed (for example, the `SyncedIfcModel` interception layer
+in Step 4 could inspect the schema and emit `IfcEnum` where appropriate). The
+`deserialize_value` function treats `IfcEnum` identically to `IfcString` —
+both produce a plain Python string.
+
 ---
 
 ## 4. Synchronization Protocol
