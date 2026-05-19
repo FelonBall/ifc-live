@@ -22,7 +22,6 @@ htmlcov/
 
 # --- uv ---
 .venv/
-uv.lock
 
 # --- Blender ---
 *.blend1
