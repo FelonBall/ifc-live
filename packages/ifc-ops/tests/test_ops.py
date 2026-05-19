@@ -52,7 +52,9 @@ def _make_envelope(payload: IfcMutation) -> IfcOpEnvelope:
     )
 
 
-def _value_roundtrip(v: IfcString | IfcInt | IfcFloat | IfcBool | IfcEnum | IfcRef | IfcList | IfcNull) -> IfcValue:
+def _value_roundtrip(
+    v: IfcString | IfcInt | IfcFloat | IfcBool | IfcEnum | IfcRef | IfcList | IfcNull,
+) -> IfcValue:
     return _value_adapter.validate_json(v.model_dump_json())
 
 
@@ -277,7 +279,9 @@ def test_modify_attribute_value_variants(
     prev: IfcString | IfcInt | IfcFloat | IfcBool | IfcEnum | IfcRef | IfcList | IfcNull,
     new: IfcString | IfcInt | IfcFloat | IfcBool | IfcEnum | IfcRef | IfcList | IfcNull,
 ) -> None:
-    env = _make_envelope(ModifyAttribute(guid=_GUID, attribute="x", previous_value=prev, new_value=new))
+    env = _make_envelope(
+        ModifyAttribute(guid=_GUID, attribute="x", previous_value=prev, new_value=new)
+    )
     assert _envelope_roundtrip(env) == env
 
 
@@ -365,8 +369,16 @@ def test_envelope_mutation_discriminator_roundtrip() -> None:
     for payload in [
         AddEntity(guid=_GUID, ifc_type="IfcWall", attributes={}),
         DeleteEntity(guid=_GUID, previous_snapshot={}),
-        ModifyAttribute(guid=_GUID, attribute="Name", previous_value=IfcNull(), new_value=IfcString(value="x")),
-        SetPropertyValue(entity_guid=_GUID, pset_name="P", property_name="q", previous_value=None, new_value=IfcNull()),
+        ModifyAttribute(
+            guid=_GUID, attribute="Name", previous_value=IfcNull(), new_value=IfcString(value="x")
+        ),
+        SetPropertyValue(
+            entity_guid=_GUID,
+            pset_name="P",
+            property_name="q",
+            previous_value=None,
+            new_value=IfcNull(),
+        ),
     ]:
         env = _make_envelope(payload)
         restored = _envelope_roundtrip(env)

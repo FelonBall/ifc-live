@@ -24,8 +24,7 @@ import sys
 
 def main() -> int:
     print(
-        "ifc-sync-bonsai-package is not implemented yet.\n"
-        "See docs/MILESTONE_1.md step 6.",
+        "ifc-sync-bonsai-package is not implemented yet.\nSee docs/MILESTONE_1.md step 6.",
         file=sys.stderr,
     )
     return 1
