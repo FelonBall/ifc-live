@@ -314,3 +314,16 @@ def test_serialize_value_non_root_registered() -> None:
 
     result = serialize_value(model, placement)
     assert result == IfcRef(guid=synthetic)
+
+
+def test_serialize_value_unwraps_nominal_value() -> None:
+    model = _fresh_model()
+    label = model.create_entity("IfcLabel", wrappedValue="REI 60")
+    result = serialize_value(model, label)
+    assert result == IfcString(value="REI 60")
+
+
+def test_serialize_value_raises_for_unknown_type() -> None:
+    model = _fresh_model()
+    with pytest.raises(TypeError, match="Cannot serialize"):
+        serialize_value(model, {"unexpected": "dict"})

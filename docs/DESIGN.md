@@ -402,8 +402,8 @@ class SyncedEntity:
             self._model._emit(ModifyAttribute(
                 guid=self._inner.GlobalId,
                 attribute=name,
-                previous_value=serialize_value(old),
-                new_value=serialize_value(value),
+                previous_value=serialize_value(self._model._inner, old),
+                new_value=serialize_value(self._model._inner, value),
             ))
         setattr(self._inner, name, value)
 
@@ -420,6 +420,37 @@ with model.suppress_emission():
     apply_op_directly(model._inner, incoming_op)
 bpy.ops.bim.refresh_ifc()  # or equivalent — tell Bonsai to redraw
 ```
+
+### `ifc-sync-core` API contracts for step 4
+
+The following conventions are fixed by the step-2 implementation and must be
+respected by the step-4 `SyncedIfcModel`.
+
+**`apply_op` takes `IfcMutation`, not `IfcOpEnvelope`.** The signature is
+`apply_op(model, op: IfcMutation)`. The caller unwraps the envelope and passes
+`envelope.payload` directly. `apply_op` has no need for transport metadata
+(author, timestamp, op_id) — those are the server's concern, not the applier's.
+
+**Serialization functions follow a consistent `(model, value)` argument order.**
+All three public helpers take the model context first:
+`serialize_value(model, val)`, `deserialize_value(model, val)`, and
+`serialize_entity(model, entity)`. Consistent ordering makes the functions easy
+to compose and prevents argument transposition errors.
+
+**`register_non_root` is public and must be called before serializing non-root
+entities.** `SyncedIfcModel` must call `register_non_root(model, entity)` when
+it intercepts the creation of any non-IfcRoot entity (e.g. `IfcLocalPlacement`,
+`IfcDirection`) — before emitting the `AddEntity` op or any op that references
+that entity. `serialize_value` raises `ValueError` if asked to serialize an
+entity that has no `GlobalId` and is absent from the registry. The GUID
+assigned by `register_non_root` becomes the `guid` field of the `AddEntity` op.
+
+**`serialize_entity` is an audit-only snapshot format.** Nested entity
+references are encoded as `{"id": <STEP ID>, "type": <IFC type>}` dicts, not as
+GUIDs. This is sufficient for `DeleteEntity.previous_snapshot` (human-readable,
+preserves enough context to understand what was deleted) but is not a reversible
+serialization: STEP entity IDs are not stable across IFC file save/reload, so
+the snapshot cannot be used to reconstruct entities after a reload.
 
 ### Open questions for implementation
 
