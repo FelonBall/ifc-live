@@ -33,7 +33,9 @@ ifc-live-dev = { workspace = true }
 # Mark the root as a non-buildable virtual project. Workspace members are
 # still built and installed; the root itself isn't packaged.
 package = false
-dev-dependencies = [
+
+[dependency-groups]
+dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
