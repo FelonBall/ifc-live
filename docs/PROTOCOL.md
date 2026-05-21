@@ -2,7 +2,9 @@
 
 > **Status:** Envelope and payload schemas are final as of Milestone 1 step 1
 > (`ifc-ops` package implemented and tested). Server message types (`sync`,
-> `ready`, `op_ack`, `conflict_resolved`) remain provisional until step 3.
+> `ready`, `op_ack`, `op` broadcast) are stable as of step 3.
+> `conflict_resolved` is reserved for step 5 (LWW conflict detection) and not
+> yet emitted.
 
 ## Transport
 
@@ -70,10 +72,14 @@ Sent after `hello` to bootstrap the client's view of the op log.
 ```json
 {
   "type": "sync",
-  "ops": [ <IfcOpEnvelope>, ... ],
-  "head_op_id": "01HM5..."
+  "ops": [ "<IfcOpEnvelope>", "..." ],
+  "head_op_id": "01HM5..." | null
 }
 ```
+
+`head_op_id` is the `op_id` at the top of the log after sync. It is `null`
+when the log is empty. Clients store this value and send it as
+`last_known_op_id` on the next `hello` to receive only newer ops.
 
 #### `ready`
 
@@ -112,10 +118,11 @@ Acknowledges receipt and assignment of a client-submitted op.
 }
 ```
 
-#### `conflict_resolved`
+#### `conflict_resolved` _(step 5 — not yet emitted)_
 
 Informational broadcast when LWW resolves a conflict. Clients use this to
-surface a notification to the user.
+surface a notification to the user. The server does not emit this message until
+step 5 adds LWW conflict detection.
 
 ```json
 {
@@ -215,6 +222,23 @@ Sets a property inside a named property set. `previous_value` is `null` (JSON
   "new_value": { "kind": "string", "value": "REI 60" }
 }
 ```
+
+---
+
+## Connection lifecycle
+
+1. Client opens a WebSocket to `/sync/<file_id>`.
+2. Client sends `hello` as its **first** message. If the first message is
+   missing, malformed, or is not a `hello`, the server closes the connection
+   with WebSocket close code **1007** (invalid payload data).
+3. Server sends `sync` (ops since `last_known_op_id`, or the full log if `null`
+   or not found), then immediately sends `ready`.
+4. Client enters steady state: sends `op` messages; receives `op_ack` and
+   peer `op` broadcasts.
+5. Any message other than `op` received in steady state causes the server to
+   close with code **1007**.
+6. Either side may close the connection at any time; the server removes the
+   client from its broadcast set on disconnect.
 
 ---
 
