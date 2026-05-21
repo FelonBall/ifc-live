@@ -75,6 +75,8 @@ class _AppRouter:
             try:
                 await client.send_text(message)
             except Exception:  # pylint: disable=broad-except
+                # Client disconnected between op receipt and broadcast.
+                # Silently remove it; there is nothing useful to report.
                 failed.add(client)
         file_state.clients -= failed
 
