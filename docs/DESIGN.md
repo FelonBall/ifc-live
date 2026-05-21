@@ -506,6 +506,12 @@ Because uvicorn runs a single asyncio event loop per worker, cooperative
 scheduling serialises all mutations between `await` points — no explicit lock
 is needed.
 
+`create_app()` accepts `host` and `port` parameters used solely to print the
+startup message via a FastAPI lifespan hook, which fires after uvicorn has bound
+the socket. The CLI passes the same values to both `create_app()` and
+`uvicorn.run()`. The app object is passed directly to `uvicorn.run()` rather
+than as an import string, so there is no module-level `app` instance.
+
 ### Message types (wire format)
 
 `ClientMessage` and `ServerMessage` are Pydantic discriminated unions keyed on

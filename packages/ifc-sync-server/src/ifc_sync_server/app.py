@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -37,19 +38,33 @@ from ifc_sync_server.state import FileState, StoredOp
 logger = logging.getLogger(__name__)
 
 
-def create_app(registry: dict[str, FileState] | None = None) -> FastAPI:
+def create_app(
+    registry: dict[str, FileState] | None = None,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+) -> FastAPI:
     """Create and return the FastAPI application.
 
     Args:
         registry: Pre-built per-file state store. Pass your own dict to get a
             fresh, isolated instance (useful in tests). When ``None``, a new
             empty dict is created.
+        host: Bind address — used only for the startup log message printed via
+            the lifespan hook. Does not affect actual socket binding (that is
+            controlled by the uvicorn call in the CLI).
+        port: Bind port — same caveat as ``host``.
 
     Returns:
         A configured ``FastAPI`` instance with all routes registered.
     """
     _registry: dict[str, FileState] = registry if registry is not None else {}
-    app = FastAPI(title="ifc-sync-server")
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+        print(f"Listening on ws://{host}:{port}")
+        yield
+
+    app = FastAPI(title="ifc-sync-server", lifespan=lifespan)
 
     # ------------------------------------------------------------------
     # Internal helpers (closures over _registry)
@@ -230,7 +245,3 @@ async def _close_safely(ws: WebSocket, code: int) -> None:
     """Close ``ws`` with the given code, ignoring errors if already closed."""
     with contextlib.suppress(Exception):
         await ws.close(code)
-
-
-# Module-level app instance used by uvicorn when launched via the CLI.
-app = create_app()

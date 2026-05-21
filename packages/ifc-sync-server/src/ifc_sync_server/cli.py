@@ -9,6 +9,8 @@ import argparse
 
 import uvicorn
 
+from ifc_sync_server.app import create_app
+
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``ifc-sync-server`` console script.
@@ -36,12 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    print(f"Listening on ws://{args.host}:{args.port}")
-    uvicorn.run(
-        "ifc_sync_server.app:app",
-        host=args.host,
-        port=args.port,
-    )
+    app = create_app(host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
 
