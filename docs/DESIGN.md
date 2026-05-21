@@ -477,25 +477,96 @@ These need to be resolved during Milestone 1 implementation, not in the design d
 ### State (v1, in-memory)
 
 ```python
+@dataclass
+class StoredOp:
+    server_position: int      # 0-based, assigned in receive order
+    envelope: IfcOpEnvelope
+    resolved: bool = False    # True when LWW modifies the op (step 5)
+
+@dataclass
+class AuditEntry:             # stub — fields populated in step 5
+    pass
+
+@dataclass
 class FileState:
     file_id: str
-    op_log: list[StoredOp]               # ordered by server position
-    audit_log: list[AuditEntry]
-    clients: set[WebSocketConnection]
-    head_op_id: UUID | None              # latest op_id
-
-class StoredOp:
-    server_position: int
-    envelope: IfcOpEnvelope
-    resolved: bool                       # was this op modified by LWW?
+    op_log: list[StoredOp] = field(default_factory=list)
+    audit_log: list[AuditEntry] = field(default_factory=list)
+    clients: set[WebSocket] = field(default_factory=set)
 ```
+
+`head_op_id` is a computed property on `FileState` rather than a stored field,
+derived from the last element of `op_log`. This avoids keeping a separate
+field in sync with the log.
+
+The global registry is a plain `dict[str, FileState]` passed into `create_app()`
+as an optional parameter. Passing `None` (the default) creates a fresh dict,
+which gives tests full state isolation without any module-level mutable state.
+Because uvicorn runs a single asyncio event loop per worker, cooperative
+scheduling serialises all mutations between `await` points — no explicit lock
+is needed.
+
+### Message types (wire format)
+
+`ClientMessage` and `ServerMessage` are Pydantic discriminated unions keyed on
+the `type` field. The server parses only `ClientMessage`; it only emits
+`ServerMessage` variants.
+
+```python
+# Client → Server
+ClientMessage = HelloMessage | ClientOpMessage   # discriminated on type=
+
+# Server → Client
+ServerMessage = SyncMessage | ReadyMessage | OpAckMessage | ServerOpMessage
+```
+
+`ClientOpMessage` and `ServerOpMessage` both carry `type="op"` — they share the
+discriminator value but live in separate union types, so there is no ambiguity:
+the server never parses a `ServerOpMessage` and never emits a `ClientOpMessage`.
+
+Parsing uses Pydantic's `TypeAdapter.validate_json()` rather than a
+`BaseModel.model_validate_json()` call, because the top-level type is an
+annotated union alias, not a concrete model.
+
+### Connection lifecycle enforcement
+
+The server enforces strict message ordering:
+
+1. The first message after `accept()` **must** be a `HelloMessage`. Any other
+   message type, or malformed JSON, causes the server to close with WebSocket
+   code `1007` (invalid frame payload data) and return.
+2. In steady state, every message **must** be a `ClientOpMessage`. A different
+   type causes the same `1007` close.
+
+This policy makes protocol violations immediately visible to clients rather than
+silently dropping unexpected messages.
+
+### `last_known_op_id` resolution
+
+When the server receives a `hello` with a non-null `last_known_op_id`, it scans
+`op_log` linearly for the first `StoredOp` whose `envelope.op_id` matches (as a
+string comparison). All ops **after** that position are included in `sync.ops`.
+
+If `last_known_op_id` is `None` or not found in the log (e.g. the client has a
+stale ID from before a server restart), the full log is returned. Linear scan
+is O(n) in log length, which is acceptable for v1's in-memory scale. No
+separate position index is maintained.
+
+### Broadcast strategy
+
+After appending an op, the server iterates `file_state.clients`, skips the
+sender, and `send_text` to each peer. Clients that raise during send
+(disconnected mid-broadcast) are collected in a temporary set and removed from
+`file_state.clients` after the loop — mutating a set during iteration would
+raise `RuntimeError`. All send failures are swallowed silently: the client is
+gone, there is nothing meaningful to report to it.
 
 ### HTTP endpoints (v1)
 
+- `GET /healthz` — liveness check
 - `GET /files` — list known file_ids (debug only)
 - `GET /files/{file_id}/log` — return full op log as JSON (debug only)
-- `GET /files/{file_id}/audit` — return audit log (debug only)
-- `GET /healthz` — liveness check
+- `GET /files/{file_id}/audit` — return audit log (debug only; empty until step 5)
 
 All real-time traffic goes through the single WebSocket endpoint `WS /sync/{file_id}`.
 
