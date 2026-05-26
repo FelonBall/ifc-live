@@ -203,8 +203,22 @@ def serialize_entity(
     return result
 
 
+def get_synthetic_guid(
+    model: ifcopenshell.file,
+    entity: ifcopenshell.entity_instance,
+) -> str | None:
+    """Return the synthetic GUID registered for *entity* in *model*, or ``None``.
+
+    Returns ``None`` if the entity is not in the non-root registry (i.e. it was
+    created directly on the raw model without going through
+    ``SyncedIfcModel.create_entity``).
+    """
+    return _synthetic_guid_for(model, entity)
+
+
 __all__ = [
     "deserialize_value",
+    "get_synthetic_guid",
     "register_non_root",
     "serialize_entity",
     "serialize_value",

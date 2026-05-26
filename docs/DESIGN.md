@@ -452,14 +452,105 @@ preserves enough context to understand what was deleted) but is not a reversible
 serialization: STEP entity IDs are not stable across IFC file save/reload, so
 the snapshot cannot be used to reconstruct entities after a reload.
 
-### Open questions for implementation
+### Decisions made during step 4 implementation
 
-These need to be resolved during Milestone 1 implementation, not in the design doc:
+#### 1. `SyncedIfcModel` constructor signature
 
-- Bonsai uses `ifcopenshell.api` for many operations rather than calling `file.create_entity` directly. Do we need to wrap the `ifcopenshell.api` module as well, or does its internal use of `file.create_entity` flow through our wrapper naturally?
-- How does the addon know which IFC file is "active" and should be synced? Bonsai supports multiple loaded files.
-- What's the right Bonsai/Blender hook to trigger viewport refresh after applying an incoming op?
-- Some Bonsai operations emit many small IfcOpenShell calls in a tight loop. Do we batch ops at the client before sending, or rely on WebSocket batching?
+```python
+class SyncedIfcModel:
+    def __init__(
+        self,
+        model: ifcopenshell.file,
+        file_id: str,
+        on_op: Callable[[IfcMutation], None],
+    ) -> None: ...
+    parent_op_id: str | None  # public, initialized to None
+```
+
+- `on_op` is invoked synchronously for each emitted `IfcMutation`. Tests pass
+  `list.append`; step 7 wraps this in envelope construction and WebSocket send.
+- `file_id` is stored for step 7 to include in `IfcOpEnvelope.file_id`.
+- `parent_op_id` is a public attribute initialised to `None`; step 7 updates it
+  to the last acknowledged server `op_id` so envelopes carry the correct causal
+  link.
+
+#### 2. Non-root entity handling in `create_entity`
+
+When `entity.GlobalId` raises `AttributeError` (non-root type), `create_entity`
+calls `register_non_root(model, entity)` immediately after creating the entity —
+before building the attributes dict. This ordering ensures that if any of the
+entity's attributes itself references another non-root entity, that entity is
+already registered and `serialize_value` will not raise. The GUID returned by
+`register_non_root` becomes the `guid` field of the `AddEntity` op.
+
+#### 3. `suppress_emission` mechanism
+
+`SyncedIfcModel` carries a `_suppressed: bool` flag (default `False`) checked in
+`_emit()`. The context manager uses save/restore rather than set/clear:
+
+```python
+@contextmanager
+def suppress_emission(self) -> Iterator[None]:
+    old = self._suppressed
+    self._suppressed = True
+    try:
+        yield
+    finally:
+        self._suppressed = old
+```
+
+This makes nested calls safe: an outer context manager restores to its pre-entry
+value even if an inner one ran. This matters when the addon applies a remote op
+(entering `suppress_emission`) while the model is already suppressed for another
+reason.
+
+#### 4. Entity reference gap
+
+`create_entity()`, `by_guid()`, and `by_type()` all return `SyncedEntity`.
+`SyncedEntity.__getattr__` also wraps any `entity_instance` it receives from the
+inner object. However, `SyncedIfcModel.__getattr__` proxies all other attribute
+access to the raw model, returning unintercepted `entity_instance` objects.
+
+Code that retrieves entities via `by_id()`, `get_inverse()`, or direct model
+iteration bypasses the wrapper and gets raw instances whose attribute sets will
+not emit ops. This is an accepted gap for step 4; step 7 audits Bonsai's access
+patterns and determines whether additional wrapping points are needed.
+
+#### 5. `ModifyAttribute` vs `SetPropertyValue` for property sets
+
+Step 4 emits `ModifyAttribute` for **all** attribute changes, including
+`IfcPropertySingleValue.NominalValue`. `SyncedEntity.__setattr__` has no semantic
+awareness of whether the entity being mutated is part of a property set.
+
+`NominalValue` (an `IfcLabel`, `IfcReal`, etc.) serialises cleanly through
+`serialize_value`'s `wrappedValue` unwrapping path, producing the correct
+`IfcValue` scalar. The resulting `ModifyAttribute` op is valid and replayable via
+`apply_op`.
+
+Step 7 will add semantic context: detecting the entity chain
+`IfcPropertySet → HasProperties → IfcPropertySingleValue` and emitting
+`SetPropertyValue` (with `pset_name` and `property_name` filled in) instead.
+
+#### 6. `ifcopenshell.api` spike result
+
+**`ifcopenshell.api.run("attribute.edit_attributes", raw_model, product=entity, ...)`
+fires `SyncedEntity.__setattr__`** when a `SyncedEntity` is passed as `product`.
+
+The `attribute.edit_attributes` module internally calls
+`setattr(settings.product, name, value)` in Python. Since `product` is our
+`SyncedEntity` Python object, Python's attribute protocol invokes
+`SyncedEntity.__setattr__` correctly. Bonsai code that uses this API for
+attribute edits is intercepted without any additional wrapping.
+
+Evidence: `test_spike_ifcopenshell_api_interception` passes without `xfail`.
+
+**Known gap**: API calls that create entities internally — geometry operations
+that call `raw_model.create_entity()` directly — bypass `SyncedIfcModel.create_entity`
+and do not emit `AddEntity` ops. Step 7 determines whether module-level patching
+of `ifcopenshell.file.create_entity` is needed to close this gap.
+
+The remaining open questions (active file detection, viewport refresh trigger,
+op batching) are unchanged and will be resolved during steps 6–7.
 
 ---
 

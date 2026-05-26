@@ -16,17 +16,23 @@ __version__ = "0.1.0"
 from ifc_sync_core.apply import apply_op
 from ifc_sync_core.serialize import (
     deserialize_value,
+    get_synthetic_guid,
     register_non_root,
     serialize_entity,
     serialize_value,
 )
 
-# Step 4 will add: SyncedIfcModel, SyncedEntity
+# Step 4 — interception wrappers
+from ifc_sync_core.synced_model import SyncedEntity, SyncedIfcModel, unwrap
 
 __all__ = [
+    "SyncedEntity",
+    "SyncedIfcModel",
     "apply_op",
     "deserialize_value",
+    "get_synthetic_guid",
     "register_non_root",
     "serialize_entity",
     "serialize_value",
+    "unwrap",
 ]
