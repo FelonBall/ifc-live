@@ -112,6 +112,11 @@ def serialize_value(
         return IfcString(value=value)
     if isinstance(value, ifcopenshell.entity_instance):
         try:
+            wrapped = value.wrappedValue  # type: ignore[attr-defined]
+            return serialize_value(model, wrapped)
+        except AttributeError:
+            pass
+        try:
             guid: str = value.GlobalId  # type: ignore[attr-defined]
             return IfcRef(guid=guid)
         except AttributeError:
@@ -125,7 +130,10 @@ def serialize_value(
         return IfcRef(guid=synthetic)
     if isinstance(value, (list, tuple)):
         return IfcList(values=[serialize_value(model, v) for v in value])  # type: ignore[misc]
-    return IfcNull()
+    raise TypeError(
+        f"Cannot serialize value of type {type(value).__name__!r} to IfcValue. "
+        "Expected: None, bool, int, float, str, entity_instance, list, or tuple."
+    )
 
 
 def deserialize_value(

@@ -6,11 +6,21 @@ Invoked as ``ifc-sync-server`` (declared in pyproject.toml).
 from __future__ import annotations
 
 import argparse
-import sys
+
+import uvicorn
+
+from ifc_sync_server.app import create_app
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the ``ifc-sync-server`` console script."""
+    """Entry point for the ``ifc-sync-server`` console script.
+
+    Args:
+        argv: Argument list to parse. Uses ``sys.argv[1:]`` when ``None``.
+
+    Returns:
+        Exit code (always ``0`` — uvicorn blocks until interrupted).
+    """
     parser = argparse.ArgumentParser(
         prog="ifc-sync-server",
         description="WebSocket relay for ifc-live real-time IFC collaboration",
@@ -28,16 +38,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # TODO(M1 step 3): launch the FastAPI app via uvicorn.
-    #   from ifc_sync_server.app import create_app
-    #   uvicorn.run(create_app(), host=args.host, port=args.port)
-    print(
-        f"ifc-sync-server is not implemented yet.\n"
-        f"Planned: would bind ws://{args.host}:{args.port}/sync/<file_id>\n"
-        f"See docs/MILESTONE_1.md step 3.",
-        file=sys.stderr,
-    )
-    return 1
+    app = create_app(host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
 
 
 if __name__ == "__main__":
