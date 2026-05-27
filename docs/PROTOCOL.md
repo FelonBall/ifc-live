@@ -3,8 +3,7 @@
 > **Status:** Envelope and payload schemas are final as of Milestone 1 step 1
 > (`ifc-ops` package implemented and tested). Server message types (`sync`,
 > `ready`, `op_ack`, `op` broadcast) are stable as of step 3.
-> `conflict_resolved` is reserved for step 5 (LWW conflict detection) and not
-> yet emitted.
+> `conflict_resolved` is emitted as of step 5 (LWW conflict detection).
 
 ## Transport
 
@@ -118,11 +117,11 @@ Acknowledges receipt and assignment of a client-submitted op.
 }
 ```
 
-#### `conflict_resolved` _(step 5 — not yet emitted)_
+#### `conflict_resolved`
 
-Informational broadcast when LWW resolves a conflict. Clients use this to
-surface a notification to the user. The server does not emit this message until
-step 5 adds LWW conflict detection.
+Informational broadcast when LWW resolves a conflict between concurrent ops.
+Sent to **all** connected clients for the file (including the originator of
+the winning op). Clients use this to surface a notification to the user.
 
 ```json
 {

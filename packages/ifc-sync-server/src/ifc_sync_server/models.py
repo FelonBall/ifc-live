@@ -11,10 +11,11 @@ See ``docs/PROTOCOL.md`` for the full wire format specification.
 from __future__ import annotations
 
 from typing import Annotated, Literal, TypeAlias
+from uuid import UUID
 
 from pydantic import BaseModel, Field, TypeAdapter
 
-from ifc_ops import IfcOpEnvelope
+from ifc_ops import IfcOpEnvelope, IfcValue
 
 # ---------------------------------------------------------------------------
 # Client → Server
@@ -116,8 +117,22 @@ class ServerOpMessage(BaseModel):
     resolved: bool = False
 
 
+class ConflictResolvedMessage(BaseModel):
+    """Broadcast when LWW resolves a conflict between concurrent ops.
+
+    Clients use this to surface a notification to the user. Sent to ALL
+    connected clients (including the originator of the winning op).
+    """
+
+    type: Literal["conflict_resolved"] = "conflict_resolved"
+    winning_op_id: str
+    losing_op_id: str
+    guid: str
+    attribute: str | None = None
+
+
 ServerMessage: TypeAlias = Annotated[
-    SyncMessage | ReadyMessage | OpAckMessage | ServerOpMessage,
+    SyncMessage | ReadyMessage | OpAckMessage | ServerOpMessage | ConflictResolvedMessage,
     Field(discriminator="type"),
 ]
 
@@ -144,6 +159,24 @@ class StoredOpResponse(BaseModel):
 class AuditEntry(BaseModel):
     """Conflict-resolution audit record for ``GET /files/{file_id}/audit``.
 
-    All fields will be populated in step 5 (LWW conflict detection). The
-    endpoint returns an empty list until then.
+    Populated when LWW conflict resolution overwrites a concurrent op.
+
+    Args:
+        winning_op_id: The op that was kept (later-received, or delete in
+            a delete-vs-modify conflict).
+        losing_op_id: The op that was overwritten or dropped.
+        guid: The entity GUID both ops targeted.
+        attribute: Attribute name (or ``"pset.prop"`` for
+            ``SetPropertyValue``), or ``None`` for entity-level conflicts.
+        winning_value: The winning op's new value (``None`` for deletes).
+        losing_value: The losing op's new value, preserved for audit.
+        resolved_at: Server unix timestamp when the conflict was resolved.
     """
+
+    winning_op_id: UUID
+    losing_op_id: UUID
+    guid: str
+    attribute: str | None = None
+    winning_value: IfcValue | None = None
+    losing_value: IfcValue | None = None
+    resolved_at: float
