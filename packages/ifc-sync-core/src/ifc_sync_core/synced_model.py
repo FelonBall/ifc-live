@@ -229,7 +229,8 @@ class SyncedIfcModel:
         Returns:
             A ``SyncedEntity`` wrapping the newly created entity.
         """
-        entity = self._model.create_entity(ifc_type, **kwargs)
+        raw_kwargs = {k: unwrap(v) if isinstance(v, SyncedEntity) else v for k, v in kwargs.items()}
+        entity = self._model.create_entity(ifc_type, **raw_kwargs)
 
         guid: str
         try:
@@ -285,6 +286,12 @@ class SyncedIfcModel:
 
         if guid is not None:
             self._emit(DeleteEntity(guid=guid, previous_snapshot=snapshot))
+        else:
+            logger.debug(
+                "Skipping DeleteEntity emit for unregistered entity %r — "
+                "create via SyncedIfcModel.create_entity to enable op tracking.",
+                inner,
+            )
 
         self._model.remove(inner)
 

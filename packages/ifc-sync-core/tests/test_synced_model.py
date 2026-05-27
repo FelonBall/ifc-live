@@ -282,6 +282,50 @@ def test_getattr_wraps_returned_entities(
 
 
 # ---------------------------------------------------------------------------
+# create_entity — SyncedEntity kwargs are unwrapped
+# ---------------------------------------------------------------------------
+
+
+def test_create_entity_unwraps_synced_entity_kwargs(
+    synced_fixture: tuple[ifcopenshell.file, SyncedIfcModel, list[IfcMutation]],
+) -> None:
+    _raw_model, synced, emitted = synced_fixture
+
+    placement = synced.create_entity("IfcLocalPlacement")
+    emitted.clear()
+
+    wall = synced.create_entity("IfcWall", ObjectPlacement=placement)
+
+    # Exactly one AddEntity op for the wall (placement already emitted earlier).
+    assert len(emitted) == 1
+    assert isinstance(emitted[0], AddEntity)
+    # The inner entity holds a raw entity_instance, not a SyncedEntity.
+    inner_placement = unwrap(wall).ObjectPlacement  # type: ignore[attr-defined]
+    assert isinstance(inner_placement, ifcopenshell.entity_instance)
+    assert not isinstance(inner_placement, SyncedEntity)
+
+
+# ---------------------------------------------------------------------------
+# remove — unregistered entity skips emit
+# ---------------------------------------------------------------------------
+
+
+def test_remove_unregistered_entity_skips_emit(
+    synced_fixture: tuple[ifcopenshell.file, SyncedIfcModel, list[IfcMutation]],
+) -> None:
+    raw_model, synced, emitted = synced_fixture
+
+    # Create directly on the raw model — not registered in the synthetic GUID table.
+    raw_placement = raw_model.create_entity("IfcLocalPlacement")
+
+    synced.remove(raw_placement)
+
+    assert len(emitted) == 0
+    # Entity is actually removed from the model.
+    assert len(raw_model.by_type("IfcLocalPlacement")) == 0
+
+
+# ---------------------------------------------------------------------------
 # NominalValue change — ModifyAttribute (not SetPropertyValue)
 # ---------------------------------------------------------------------------
 
