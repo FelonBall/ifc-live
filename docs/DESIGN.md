@@ -344,6 +344,45 @@ The conflict matrix, explicitly:
 
 GUID collisions for `add_entity` should be vanishingly rare with UUIDv4-derived IFC GlobalIds, but we handle them defensively.
 
+### Decisions made during step 5 implementation
+
+#### 1. Concurrency detection algorithm
+
+When the server receives op B with `parent_op_id = P`, it scans `op_log` linearly for the first entry whose `op_id == P`. All entries after that position are concurrent. If `P` is `None` or not found (stale ID, post-restart), all log entries are treated as concurrent — the conservative choice for data integrity.
+
+Known v1 limitation: if an op's `parent_op_id` points to a subsequently-resolved op, the incoming op is not treated as concurrent with the winning op. This is acceptable for v1.
+
+#### 2. `ConflictResult` shape
+
+```python
+@dataclass
+class ConflictResult:
+    should_append: bool
+    audit_entries: list[AuditEntry]
+    resolved_op_positions: list[int]
+```
+
+A plain `@dataclass`, not a Pydantic model. `ConflictResult` is internal server state passed between `FileState.detect_and_resolve` and `_AppRouter._steady_state`. It never touches the wire, so Pydantic's validation overhead is not justified. The three fields map cleanly to the three actions `_steady_state` must take: decide whether to append, record the audit, and retroactively mark resolved positions.
+
+Conflict detection logic is split into module-level helpers (`_find_concurrent_ops`, `_check_concurrent_pair`, `_PairOutcome`) to keep `detect_and_resolve` below the 15-statement cognitive-complexity limit.
+
+#### 3. Retroactive `resolved=True` marking
+
+Marked in-place by index: `op_log[pos].resolved = True`. `StoredOp` is a mutable `@dataclass`; replacing the entry would require rebuilding it from the envelope, which adds no safety. The server has no invariant that requires op log entries to be immutable — reads of `resolved` happen only in `_find_concurrent_ops` and in the HTTP log endpoint, both of which tolerate the mutated value.
+
+#### 4. Delete-wins special case
+
+Delete wins regardless of receive order — this overrides the usual LWW "later received wins" rule when one op is a `DeleteEntity`:
+
+- **B is delete, A is modify** (in log): A's position is added to `resolved_op_positions`; B is appended and broadcast normally; audit entry created (winning=B, losing=A).
+- **A is delete (in log), B is modify** (incoming): `should_append=False`; audit entry created (winning=A, losing=B); `conflict_resolved` broadcast to all clients. The modify is acked to the sender but never appended.
+
+Both cases produce an audit entry and a `conflict_resolved` message so the modify's author knows their work was lost.
+
+#### 5. Idempotent double-delete
+
+When both the concurrent op A and the incoming op B are `DeleteEntity` on the same GUID: `should_append=False`, `audit_entries=[]`, `resolved_op_positions=[]`. No `conflict_resolved` message is emitted. The entity was already deleted after A was applied; B is silently dropped. This is not a data conflict — no user's work is lost — so no audit trail is needed.
+
 ---
 
 ## 6. The `SyncedIfcModel` Interception Strategy

@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from ifc_sync_server.models import (
     AuditEntry,
     ClientOpMessage,
+    ConflictResolvedMessage,
     FileInfoResponse,
     HelloMessage,
     OpAckMessage,
@@ -56,6 +57,25 @@ class _AppRouter:
         if file_id not in self._registry:
             self._registry[file_id] = FileState(file_id=file_id)
         return self._registry[file_id]
+
+    async def _broadcast_to_all(
+        self,
+        file_state: FileState,
+        message: str,
+    ) -> None:
+        """Send ``message`` to every client in ``file_state``, including the sender.
+
+        Used for ``conflict_resolved`` notifications which must reach all clients
+        (including the originator of the winning op). Disconnected clients are
+        removed after the loop to avoid mutating the set during iteration.
+        """
+        failed: set[WebSocket] = set()
+        for client in file_state.clients:
+            try:
+                await client.send_text(message)
+            except Exception:  # pylint: disable=broad-except
+                failed.add(client)
+        file_state.clients -= failed
 
     async def _broadcast_to_others(
         self,
@@ -128,22 +148,45 @@ class _AppRouter:
                 break
 
             position = len(file_state.op_log)
-            file_state.op_log.append(StoredOp(server_position=position, envelope=incoming.envelope))
+            incoming_stored = StoredOp(server_position=position, envelope=incoming.envelope)
+            result = file_state.detect_and_resolve(incoming_stored)
+
+            # Apply conflict resolutions retroactively before touching the log.
+            for pos in result.resolved_op_positions:
+                file_state.op_log[pos].resolved = True
+            file_state.audit_log.extend(result.audit_entries)
+
+            # Always ack the sender — confirms receipt even for dropped ops.
             await ws.send_text(
                 OpAckMessage(
                     op_id=str(incoming.envelope.op_id),
                     server_position=position,
                 ).model_dump_json()
             )
-            await self._broadcast_to_others(
-                file_state,
-                ws,
-                ServerOpMessage(
-                    envelope=incoming.envelope,
-                    server_position=position,
-                    resolved=False,
-                ).model_dump_json(),
-            )
+
+            if result.should_append:
+                file_state.op_log.append(incoming_stored)
+                await self._broadcast_to_others(
+                    file_state,
+                    ws,
+                    ServerOpMessage(
+                        envelope=incoming.envelope,
+                        server_position=position,
+                        resolved=False,
+                    ).model_dump_json(),
+                )
+
+            # Broadcast conflict_resolved to ALL clients for each audit entry.
+            for entry in result.audit_entries:
+                await self._broadcast_to_all(
+                    file_state,
+                    ConflictResolvedMessage(
+                        winning_op_id=str(entry.winning_op_id),
+                        losing_op_id=str(entry.losing_op_id),
+                        guid=entry.guid,
+                        attribute=entry.attribute,
+                    ).model_dump_json(),
+                )
 
     # ------------------------------------------------------------------
     # HTTP debug endpoints
@@ -175,8 +218,11 @@ class _AppRouter:
         ]
 
     async def get_audit(self, file_id: str) -> list[AuditEntry]:
-        """Return the audit log (empty until step 5 adds conflict resolution)."""
-        return []
+        """Return the full audit log for a file as a JSON list."""
+        fs = self._registry.get(file_id)
+        if fs is None:
+            return []
+        return list(fs.audit_log)
 
     # ------------------------------------------------------------------
     # WebSocket endpoint
