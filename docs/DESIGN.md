@@ -1,7 +1,7 @@
 # ifc-live — Design Document
 
 **Status:** Draft v0.1
-**Last updated:** 2026-05-17
+**Last updated:** 2026-06-29
 **License of this project:** Apache 2.0
 
 ---
@@ -387,6 +387,14 @@ When both the concurrent op A and the incoming op B are `DeleteEntity` on the sa
 
 ## 6. The `SyncedIfcModel` Interception Strategy
 
+> **Note (superseded for Bonsai):** The `tool.Ifc.get` monkey-patch strategy
+> described in this section was found unsuitable for the Bonsai integration
+> during the step 6a spike. See §6a for the findings and §6b for the revised
+> Bonsai integration architecture. This section is retained because the
+> `SyncedIfcModel` design remains valid and tested for headless and
+> non-Bonsai contexts, and the underlying `ifc-sync-core` diff / apply /
+> serialize logic is fully reusable.
+
 ### Goal
 
 Wrap `ifcopenshell.file` such that every mutation of the model emits an `IfcOp` without changing the API surface Bonsai uses. Bonsai code should not need to be modified.
@@ -590,6 +598,133 @@ of `ifcopenshell.file.create_entity` is needed to close this gap.
 
 The remaining open questions (active file detection, viewport refresh trigger,
 op batching) are unchanged and will be resolved during steps 6–7.
+
+---
+
+## 6a. Bonsai integration spike findings
+
+> **Status:** Recorded during the step 6a spike (interactive investigation in
+> Blender 5.1 + Bonsai). These findings invalidate part of the original §6
+> interception strategy. The revised integration architecture is in §6b.
+
+The original §6 strategy assumed the Bonsai addon could monkey-patch
+`bonsai.tool.Ifc.get` so that Bonsai's own operations flowed through
+`SyncedIfcModel`, and that applying a remote op would be "mutate the model +
+trigger a viewport refresh." The spike showed both assumptions are wrong for
+Bonsai's actual architecture.
+
+### Finding 1 — model access and the `None` case
+
+`bonsai.tool.Ifc.get()` returns the live `ifcopenshell.file` (schema IFC4 in
+the test project) when a project is loaded, and returns `None` when no project
+is loaded. The connect path must guard against `None` and refuse to start a
+sync session with a clear message ("load or create an IFC project first")
+rather than crashing.
+
+### Finding 2 — `tool.Ifc.get` is the wrong interception layer
+
+`tool.Ifc.get()` is a thin classmethod that delegates to
+`IfcStore.get_file()`, which returns the stored class attribute `IfcStore.file`
+(with a lazy-load fallback). The canonical storage location of the model is
+`IfcStore.file`.
+
+Within `bonsai/bim/ifc.py` alone, `IfcStore.file` is accessed directly 11
+times versus 2 references to `get_file`. Across the wider Bonsai codebase the
+ratio is more lopsided still. **Patching `tool.Ifc.get` would therefore miss
+the majority of Bonsai's model access**, because most internal code reads
+`IfcStore.file` directly rather than calling the accessor.
+
+If interception at this layer were pursued at all, it would have to replace
+`IfcStore.file` itself (e.g. with a property/descriptor or by storing a proxy
+object in that attribute) — not patch the accessor. See Finding 4 for why even
+this is insufficient.
+
+### Finding 3 — the viewport does not auto-refresh
+
+Mutating the IFC model directly (renaming a wall, moving its placement
+coordinates, even removing the wall entirely) produced **no change in the 3D
+viewport**, and no passive redraw (orbiting, clicking) picked up the change.
+
+Bonsai's architecture treats the IFC model (`IfcStore.file`) as the source of
+truth and *generates* Blender mesh objects from the IFC geometry. The two
+layers are not automatically coupled. Bonsai keeps them in sync only because
+its own operators regenerate the Blender side after mutating IFC. Relevant
+regeneration operators discovered: `bpy.ops.bim.update_representation`,
+`switch_representation`, `load_project_elements`, and the nuclear
+`reload_ifc_file`.
+
+Consequence: applying a remote op must *explicitly* regenerate the affected
+Blender objects. There is no "just refresh" call that reconciles an
+arbitrary out-of-band IFC mutation.
+
+### Finding 4 — Bonsai maintains a Blender-object ↔ IFC-entity link that direct mutation corrupts
+
+This is the most consequential finding.
+
+Every Blender object that represents an IFC element carries an
+`ifc_definition_id` (accessed via
+`tool.Blender.get_object_bim_props(obj).ifc_definition_id`) linking it to a
+specific IFC instance. `IfcStore.id_map` and `IfcStore.guid_map` are the
+maintained indices for this bidirectional link.
+
+When the spike ran `model.remove(wall)` directly on the IFC model, the IFC
+entity was deleted but the corresponding Blender object — still carrying the
+now-dangling `ifc_definition_id` — remained. On the next save, Bonsai's
+`export_ifc.sync_all_objects` → `sync_object_placement` walked all Blender
+objects and called `self.file.by_id(<deleted id>)` to write each object's
+placement back into IFC, which raised:
+
+```
+RuntimeError: Instance #70 not found
+```
+
+The session was corrupted: save reliably failed or crashed.
+
+**Conclusion:** mutating the IFC model out from under Bonsai orphans Blender
+objects and corrupts save (and, by the same mechanism, undo/redo). Any op
+application that adds, removes, or moves an entity **must also reconcile
+Bonsai's Blender-object layer and the id/guid maps** — not merely mutate the
+IFC model.
+
+### Finding 5 — Bonsai's transaction system is operator-level, not mutation-level
+
+`IfcStore` has a full undo/redo transaction system (`begin_transaction`,
+`add_transaction_operation`, `history`, `future`, `undo`, `redo`). However it
+operates at the **operator** granularity: `begin_transaction(operator)` keys a
+transaction on an operator instance, and `add_transaction_operation` records
+`rollback`/`commit` callbacks attached to that operator. It does not expose a
+per-entity-mutation event stream.
+
+Two consequences:
+
+1. The transaction system cannot be used as a clean "subscribe to every IFC
+   mutation" hook — it is too coarse and operator-centric.
+2. Remote op application that bypasses Bonsai's operators will not be recorded
+   in the undo history. A subsequent user `Ctrl+Z` could roll the model back to
+   a state inconsistent with applied remote ops, corrupting sync. Remote
+   application must either participate in the transaction system or explicitly
+   manage the undo interaction.
+
+### Overall conclusion
+
+Entity-level interception via `SyncedIfcModel` — wrapping `create_entity`,
+`__setattr__`, and `remove` on the IfcOpenShell file — is **not a suitable
+integration mechanism for Bonsai**, because:
+
+- On capture, most of Bonsai's own model access bypasses any wrapper installed
+  at the `tool.Ifc.get` layer (Finding 2).
+- On apply, raw mutation corrupts Bonsai's Blender-object layer, save, and undo
+  (Findings 3, 4, 5).
+
+`SyncedIfcModel` remains correct and tested for headless / non-Bonsai contexts,
+and the underlying diff / apply / serialize logic in `ifc-sync-core` is fully
+reusable. But the Bonsai addon requires **operator-level integration** — hooking
+Bonsai's operators (or its transaction commit callbacks) for capture, and
+applying remote ops *through* Bonsai's regeneration operators (or with explicit
+Blender-object + id/guid-map reconciliation) for apply.
+
+The revised integration architecture is specified in §6b (to be written in the
+design session following this spike).
 
 ---
 
